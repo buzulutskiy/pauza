@@ -1,5 +1,5 @@
 /* «Пауза» — service worker. Кэшируется только оболочка; данные живут в localStorage. */
-const CACHE = "pauza-v1";
+const CACHE = "pauza-v2";   // v2: иконки заменены на знак из шапки
 const ASSETS = [
   "./", "./index.html", "./app.js", "./manifest.webmanifest",
   "./icon-180.png", "./icon-192.png", "./icon-512.png", "./favicon-32.png"
