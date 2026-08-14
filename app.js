@@ -64,6 +64,26 @@ const ACTS_NIGHT_BY_KIND = {
 };
 const isNight = () => { const h = new Date().getHours(); return h >= 23 || h < 6; };
 
+/* Где сидит тяга. Это не опрос — это сам приём: наблюдать телесное
+   ощущение вместо того, чтобы спорить с мыслью. Заодно видно, что
+   ощущение меняется само, пока ты за ним следишь. */
+const BODY = [
+  { id: "chest",  t: "В груди" },
+  { id: "belly",  t: "В животе" },
+  { id: "throat", t: "В горле" },
+  { id: "hands",  t: "В руках" },
+  { id: "head",   t: "В голове" },
+  { id: "whole",  t: "Везде сразу" },
+  { id: "none",   t: "Не могу поймать" }
+];
+
+/* Дыхание: вдох 4 — выдох 6, около шести циклов в минуту.
+   Работу делает длинный выдох; задержки нет намеренно — она у части
+   людей усиливает тревогу, а выигрыша по сравнению с длинным выдохом
+   не даёт. Круг задаёт ритм, чтобы не считать самому. */
+const BR_IN = 4, BR_OUT = 6;
+const BR_CYCLE = BR_IN + BR_OUT;
+
 const ACTS_BY_KIND = {
   food:  [{ id: "teeth", t: "Почистить зубы" }, { id: "tea", t: "Заварить чай" }, { id: "kitch", t: "Уйти с кухни" }],
   phone: [{ id: "away", t: "Телефон в другую комнату" }, { id: "grey", t: "Сделать экран серым" }],
@@ -552,11 +572,11 @@ $("#wGhost").setAttribute("d", pathTo(1, false));
 
 /* ───────────────────────── сессия волны ───────────────────────── */
 
-let live = null, raf = 0, lock = null, stage = "", peaked = false;
+let live = null, raf = 0, beat = 0, lock = null, stage = "", peaked = false;
 
 function startWave(kindId, resume, opts) {
   live = resume || {
-    id: uid(), kind: kindId, ts: Date.now(), states: [], act: null,
+    id: uid(), kind: kindId, ts: Date.now(), states: [], act: null, body: null,
     planned: (opts && opts.dur) || DB.s.dur,
     cont: (opts && opts.cont) || null
   };
@@ -569,6 +589,10 @@ function startWave(kindId, resume, opts) {
   renderBot();
   tick();
   raf = requestAnimationFrame(loop);
+  /* Страховка на случай, если кадры не идут: во встроенных браузерах и на
+     скрытой вкладке requestAnimationFrame молчит, а волна идти обязана. */
+  clearInterval(beat);
+  beat = setInterval(() => { if (live) tick(); }, 1000);
   if (navigator.wakeLock) navigator.wakeLock.request("screen").then(l => lock = l).catch(() => {});
   vib(14);
 }
@@ -615,18 +639,83 @@ function tick() {
 
   if (!peaked && u >= .22) { peaked = true; vib([10, 60, 10]); }
 
-  const want = u < .14 && e < 45 ? "breath" : u < .55 ? "states" : "acts";
+  /* Порядок не случайный: на подъёме и пике — тело (дыхание, холод),
+     потом наблюдение ощущения, и только на спаде — вопросы и планы.
+     Заполнять анкету на пике человек не может, и просить об этом незачем. */
+  const want = u < .30 ? "breath" : u < .45 ? "body" : u < .62 ? "states" : "acts";
   if (want !== stage) { stage = want; renderBot(); }
+  if (stage === "breath") paintBreath(e);
 
   if (u >= 1) finish("waited");
+}
+
+/* Круг растёт на вдохе и опадает на выдохе. Первые три цикла отбиваются
+   вибрацией, чтобы можно было следовать с закрытыми глазами; дальше
+   вибрация замолкает — иначе за пять минут она сама станет раздражителем. */
+let brLast = -1;
+function paintBreath(e) {
+  const ring = document.querySelector("#pcRing");
+  if (!ring) return;
+  const t = e % BR_CYCLE, n = Math.floor(e / BR_CYCLE);
+  const inhale = t < BR_IN;
+  const p = inhale ? t / BR_IN : (t - BR_IN) / BR_OUT;
+  const ease = .5 - .5 * Math.cos(Math.PI * clamp(p, 0, 1));
+  const k = inhale ? .52 + .48 * ease : 1 - .48 * ease;
+  ring.style.transform = "scale(" + k.toFixed(3) + ")";
+  ring.style.opacity = (.35 + .45 * (k - .52) / .48).toFixed(2);
+
+  const phase = (inhale ? "in" : "out") + n;
+  if (phase !== brLast) {
+    brLast = phase;
+    document.querySelector("#pcLab").textContent = inhale ? "Вдох" : "Выдох";
+    if (n < 3) vib(inhale ? 10 : [6, 40, 6]);
+    document.querySelector("#pcSub").textContent = n === 0
+      ? "Считать не надо — просто следуй за кругом"
+      : "Выдох длиннее вдоха: именно он и успокаивает · круг " + (n + 1);
+  }
 }
 
 function renderBot() {
   const box = $("#wBot"); box.innerHTML = "";
   if (stage === "breath") {
-    box.appendChild(el("div", "qcard", `<h4>Пока просто дыши</h4>
-      <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--ink-soft)">
-      Вдох на 4 счёта — задержка на 7 — выдох на 8. Три круга. Это сбивает тревогу быстрее, чем уговоры.</p>`));
+    const c = el("div", "qcard pacer", `
+      <h4>Дыши за кругом</h4>
+      <div class="pc"><span class="pc-ring" id="pcRing"></span><span class="pc-lab" id="pcLab">Вдох</span></div>
+      <p class="pc-sub" id="pcSub">Считать не надо — просто следуй за кругом</p>
+      <button class="pc-more" id="pcMore">Слишком сильно — что делать прямо сейчас</button>
+      <div class="pc-hard" id="pcHard" hidden>
+        <p><b>Холодная вода на лицо.</b> Наклонись над раковиной, задержи дыхание и опусти лицо
+        в холодную воду на 15–30 секунд. Или приложи холодное к глазам и скулам.</p>
+        <p>Срабатывает нырятельный рефлекс: пульс падает за полминуты. Это самый быстрый способ
+        сбить накал, когда слова уже не помогают.</p>
+        <p class="pc-warn">Если есть проблемы с сердцем — этот приём не для тебя, оставайся на дыхании.</p>
+      </div>`);
+    box.appendChild(c);
+    c.querySelector("#pcMore").addEventListener("click", () => {
+      const h = c.querySelector("#pcHard");
+      h.hidden = !h.hidden;
+      c.querySelector("#pcMore").textContent = h.hidden
+        ? "Слишком сильно — что делать прямо сейчас" : "Свернуть";
+    });
+    paintBreath(elapsed());
+    return;
+  }
+
+  if (stage === "body") {
+    const c = el("div", "qcard", `<h4>Где оно сейчас в теле?</h4>
+      <p class="qsub">Не спорь с мыслью — найди ощущение и просто смотри на него. Оно меняется само,
+      пока ты за ним следишь: в этом весь приём.</p>`);
+    const o = el("div", "opts");
+    for (const b0 of BODY) {
+      const b = el("button", "opt" + (live.body === b0.id ? " on" : ""), esc(b0.t));
+      b.addEventListener("click", () => {
+        live.body = live.body === b0.id ? null : b0.id;
+        DB.live = live; save(); markDirty(); renderBot(); vib(6);
+      });
+      o.appendChild(b);
+    }
+    c.appendChild(o);
+    box.appendChild(c);
     return;
   }
   if (stage === "states") {
@@ -694,17 +783,17 @@ $("#stopBtn").addEventListener("click", () => {
 });
 
 function closeWave() {
-  cancelAnimationFrame(raf);
+  cancelAnimationFrame(raf); clearInterval(beat);
   $("#wave").classList.remove("on");
   if (lock) { try { lock.release(); } catch (e) {} lock = null; }
 }
 
 function finish(outcome) {
   if (!live) return;
-  cancelAnimationFrame(raf);
+  cancelAnimationFrame(raf); clearInterval(beat);
   const ep = {
     id: live.id, ts: live.ts, kind: live.kind, states: live.states,
-    act: live.act, planned: live.planned, cont: live.cont || null,
+    act: live.act, body: live.body || null, planned: live.planned, cont: live.cont || null,
     waited: Math.round(clamp(elapsed(), 0, live.planned)),
     outcome, upd: Date.now()
   };
