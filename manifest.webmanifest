@@ -1,0 +1,17 @@
+{
+  "name": "Пауза — промежуток между импульсом и действием",
+  "short_name": "Пауза",
+  "description": "Тренажёр паузы: переждать волну желания, увидеть свой паттерн и получать за это награды. Офлайн, данные только на устройстве.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#EFF3F4",
+  "theme_color": "#EFF3F4",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
