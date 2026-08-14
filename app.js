@@ -47,6 +47,23 @@ const ACTS_COMMON = [
   { id: "write",  t: "Записать, что чувствую" },
   { id: "out",    t: "Выйти из комнаты" }
 ];
+/* Ночью половина дневных замен вредна: ходьба, приседания и яркий свет
+   разгоняют и мешают заснуть обратно. Ночная задача другая — не взбодриться,
+   а вернуться в постель, не подкрепив связку «проснулся → поел». */
+const ACTS_NIGHT = [
+  { id: "nwater", t: "Вода и обратно в кровать" },
+  { id: "teeth",  t: "Почистить зубы" },
+  { id: "nfridge", t: "Уйти с кухни, не открывая холодильник" },
+  { id: "nbreath", t: "Дыхание 4–7–8 лёжа" },
+  { id: "nlight", t: "Не включать яркий свет" },
+  { id: "nline",  t: "Записать одной строкой, что чувствую" },
+  { id: "nbed",   t: "Просто лечь обратно" }
+];
+const ACTS_NIGHT_BY_KIND = {
+  self: [{ id: "up", t: "Встать и сменить комнату" }, { id: "cold", t: "Холодная вода на лицо" }]
+};
+const isNight = () => { const h = new Date().getHours(); return h >= 23 || h < 6; };
+
 const ACTS_BY_KIND = {
   food:  [{ id: "teeth", t: "Почистить зубы" }, { id: "tea", t: "Заварить чай" }, { id: "kitch", t: "Уйти с кухни" }],
   phone: [{ id: "away", t: "Телефон в другую комнату" }, { id: "grey", t: "Сделать экран серым" }],
@@ -55,6 +72,95 @@ const ACTS_BY_KIND = {
   buy:   [{ id: "cart", t: "Положить в корзину и закрыть" }, { id: "24", t: "Правило 24 часов" }],
   subst: [{ id: "teeth", t: "Почистить зубы" }, { id: "tea", t: "Заварить чай" }]
 };
+
+/* ───────────────────────── треки ─────────────────────────
+   У еды и у «личного» разные механизмы, поэтому и мерить надо разное.
+   Общая часть — переждать волну; всё остальное у каждого своё: причины,
+   замены, рычаги среды и то, по чему видно движение.
+
+   Что здесь опирается на исследования, а что нет — написано прямо в
+   приложении, на карточке «Что об этом известно». Обещаний, которых
+   наука не подтверждает, в текстах нет. */
+
+const STATE_EXTRA = {
+  food: [
+    { id: "woke",    t: "Проснулся ночью" },
+    { id: "nodin",   t: "Толком не ужинал" },
+    { id: "noslp",   t: "Недоспал" },
+    { id: "kitchen", t: "Просто зашёл на кухню" }
+  ],
+  self: [
+    { id: "alone",  t: "Один дома" },
+    { id: "inbed",  t: "В кровати с телефоном" },
+    { id: "late",   t: "Долго не ложусь" },
+    { id: "stress", t: "Тяжёлый день" }
+  ]
+};
+
+/* Рычаги среды: то, что в исследованиях двигает дело сильнее уговоров.
+   Отмечаются за день, а не за эпизод: это профилактика, а не реакция. */
+const LEVERS = {
+  food: [
+    { id: "breakfast", t: "Позавтракал",              h: "Недобор еды днём — самый частый мотор ночных походов: организм добирает ночью то, чего не получил" },
+    { id: "dinner",    t: "Нормально поужинал",       h: "Плотный ужин с белком за 2–3 часа до сна снимает ночной голод лучше любого запрета" },
+    { id: "sleep",     t: "Лёг в своё время",         h: "Недосып сдвигает гормоны голода: меньше сна — сильнее тяга на следующий день" },
+    { id: "kitchoff",  t: "Кухня закрыта на ночь",    h: "Убрать быструю еду с виду. Решение принимается за секунду — выигрывает то, что ближе" },
+    { id: "nophone",   t: "Телефон не в кровати",     h: "Ночное пробуждение с экраном почти всегда заканчивается походом на кухню" }
+  ],
+  self: [
+    { id: "sleep",    t: "Лёг в своё время",        h: "Усталость и недосып — самые надёжные предвестники срыва, сильнее «настроя»" },
+    { id: "nophone",  t: "Телефон не в кровати",    h: "Контроль среды работает там, где сила воли не работает: убрать повод дешевле, чем ему сопротивляться" },
+    { id: "outbed",   t: "Кровать — только для сна", h: "Связка «кровать + телефон + один» и есть спусковой крючок. Разорвать связку проще, чем терпеть" },
+    { id: "moved",    t: "Была нагрузка днём",      h: "Физическая нагрузка снижает напряжение, которое иначе ищет быстрый сброс" },
+    { id: "talked",   t: "Поговорил с кем-то живьём", h: "Одиночество и стыд усиливают петлю. Разговор — не мораль, а разрядка" }
+  ]
+};
+
+/* Оценка: не «сколько дней держусь», а насколько разомкнулась связка
+   «импульс → действие». Считается по доле переждённых волн — это то,
+   что в поведенческой терапии называют угасанием: связь слабеет тогда,
+   когда сигнал раз за разом не подкрепляется. */
+const STAGES = {
+  food: [
+    { t: "Круг замкнут",    d: "Пока почти каждое пробуждение заканчивается кухней. Это не характер — это заученная связка." },
+    { t: "Круг рвётся",     d: "Примерно половина ночей уже проходит иначе. Связка перестала быть автоматической." },
+    { t: "Связь слабеет",   d: "Большинство эпизодов заканчиваются без еды. Ночное пробуждение больше не означает «идти есть»." },
+    { t: "Связь угасает",   d: "Пробуждение и еда почти разъединились. Отдельные возвраты нормальны — так угасание и выглядит." }
+  ],
+  self: [
+    { t: "Автопилот",           d: "Пока импульс чаще всего сразу переходит в действие. Промежутка почти нет." },
+    { t: "Появился зазор",      d: "Примерно в половине случаев между импульсом и действием уже есть пауза." },
+    { t: "Выбор возвращается",  d: "Большинство волн ты пережидаешь. Импульс перестал быть командой." },
+    { t: "Пауза стала привычкой", d: "Волна почти всегда проходит сама. Отдельные возвраты — обычное дело, а не откат." }
+  ]
+};
+
+/* Карточка «что об этом известно». Отдельно — что подтверждено,
+   отдельно — что ходит по интернету без подтверждений. */
+const SCIENCE = {
+  food: [
+    ["✔", "Ночная еда — описанный паттерн, а не распущенность. Его выделили ещё в 1955 году (Альберт Станкард): мало едят днём, добирают вечером и ночью, просыпаются и идут к холодильнику."],
+    ["✔", "Главный рычаг — не запрет ночью, а еда днём. Когда дневная норма и белок на месте, ночные подъёмы редеют сами: организму нечего добирать."],
+    ["✔", "Сон. Недосып поднимает гормоны голода и опускает насыщение — на следующий день тяга сильнее без всякой «слабости»."],
+    ["✔", "Контроль среды сильнее самоконтроля. Что не лежит на виду, то не съедается: решение ночью принимается за секунду, и выигрывает ближайшее."],
+    ["✔", "Связь «проснулся → поел» угасает от повторов, когда пробуждение раз за разом не заканчивается едой. Отдельные возвраты нормальны и не отменяют пройденного."],
+    ["✖", "«Заедание — это про силу воли». Ночной эпизод чаще объясняется недобором днём и недосыпом, чем характером."],
+    ["!", "Если ночные подъёмы с едой стали регулярными или мешают спать — это отдельная тема для врача. Для неё есть рабочие подходы, включая КПТ; разбираться в одиночку не обязательно."]
+  ],
+  self: [
+    ["✔", "Переживание волны — рабочий приём из профилактики срывов (Марлатт). Тяга ведёт себя как волна: поднимается, доходит до пика и спадает сама, если её не подкреплять."],
+    ["✔", "Контекст решает больше, чем настрой. Поведение запускается связкой места, времени и одиночества — поэтому смена обстановки работает там, где уговоры не работают."],
+    ["✔", "Срыв не обнуляет пройденное. Мышление «раз сорвался — всё зря» изучено отдельно и само по себе тянет к полному откату; это ошибка, а не правда о тебе."],
+    ["✔", "Стыд ухудшает дело. Исследования показывают: тяжесть переживаний часто связана не с частотой, а с тем, насколько человек себя за это осуждает."],
+    ["✔", "Сон, усталость и стресс — предсказуемые предвестники. По ним видно приближение эпизода лучше, чем по «силе воли»."],
+    ["✖", "«Перезагрузка за 90 дней», «дофаминовый детокс», обещания скачка энергии и тестостерона — популярные утверждения без надёжных подтверждений. Приложение их не повторяет."],
+    ["!", "Если это ощущается как потеря контроля и всерьёз мешает жить — с этим работают специалисты (КПТ, ACT). Обращаться за помощью тут не «слабость», а короткий путь."]
+  ]
+};
+
+const TRACKED = ["food", "self"];
+const hasTrack = id => TRACKED.includes(id);
+const statesFor = kind => STATES.concat(STATE_EXTRA[kind] || []).concat(ownStates());
 
 /* ───────────────────────── навыки ───────────────────────── */
 
@@ -102,9 +208,9 @@ const MEDALS = [
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(KEY));
-    if (d && d.v === 1) { d.why = d.why || []; return d; }
+    if (d && d.v === 1) { d.why = d.why || []; d.lev = d.lev || {}; return d; }
   } catch (e) {}
-  return { v: 1, ep: [], kinds: [], why: [], medals: {}, live: null, s: { dur: 300, vib: true, theme: "auto" } };
+  return { v: 1, ep: [], kinds: [], why: [], lev: {}, medals: {}, live: null, s: { dur: 300, vib: true, theme: "auto" } };
 }
 let DB = load();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {} };
@@ -145,7 +251,7 @@ function gh(path, opts = {}) {
   }, opts));
 }
 
-const exportData = () => ({ version: 1, ep: DB.ep, kinds: DB.kinds, why: DB.why, medals: DB.medals });
+const exportData = () => ({ version: 1, ep: DB.ep, kinds: DB.kinds, why: DB.why, lev: DB.lev, medals: DB.medals });
 
 function mergeAll(remote) {
   /* эпизоды и свои импульсы — по id, побеждает более свежая правка */
@@ -172,6 +278,12 @@ function mergeAll(remote) {
     if (!ex || (x.upd || 0) >= (ex.upd || 0)) wById.set(x.id, x);
   }
   DB.why = [...wById.values()];
+
+  /* рычаги за день — объединяем: отметил на телефоне, отметил на компьютере,
+     оба раза правда. Терять чужую отметку тут не за что. */
+  for (const [day, ids] of Object.entries(remote.lev || {})) {
+    DB.lev[day] = [...new Set((DB.lev[day] || []).concat(ids))];
+  }
 
   /* медаль засчитывается по самой ранней дате получения */
   for (const [id, ts] of Object.entries(remote.medals || {})) {
@@ -520,7 +632,7 @@ function renderBot() {
   if (stage === "states") {
     const c = el("div", "qcard", `<h4>Из-за чего накрыло?</h4>`);
     const o = el("div", "opts");
-    for (const s of allStates()) {
+    for (const s of statesFor(live.kind)) {
       const b = el("button", "opt" + (live.states.includes(s.id) ? " on" : ""), esc(s.t));
       b.addEventListener("click", () => {
         live.states = live.states.includes(s.id) ? live.states.filter(x => x !== s.id) : live.states.concat(s.id);
@@ -543,8 +655,11 @@ function renderBot() {
     box.appendChild(c);
     return;
   }
-  const acts = ACTS_COMMON.concat(ACTS_BY_KIND[live.kind] || []);
-  const c = el("div", "qcard", `<h4>Чем займёшь ближайшие 10 минут?</h4>`);
+  const night = isNight();
+  const acts = night
+    ? ACTS_NIGHT.concat(ACTS_NIGHT_BY_KIND[live.kind] || [])
+    : ACTS_COMMON.concat(ACTS_BY_KIND[live.kind] || []);
+  const c = el("div", "qcard", `<h4>${night ? "Как вернуться в постель?" : "Чем займёшь ближайшие 10 минут?"}</h4>`);
   const o = el("div", "opts");
   for (const a of acts) {
     const b = el("button", "opt" + (live.act === a.id ? " on" : ""), esc(a.t));
@@ -646,8 +761,10 @@ function renderResult(ep, before, after, fresh, outcome) {
   }
 
   if (ep.act) {
-    const a = ACTS_COMMON.concat(ACTS_BY_KIND[ep.kind] || []).find(x => x.id === ep.act);
-    if (a) h += `<div class="card"><h3>Твой план на 10 минут</h3><p>${esc(a.t)} — начни прямо сейчас, пока волна низкая.</p></div>`;
+    const a = ACTS_COMMON.concat(ACTS_NIGHT, ACTS_BY_KIND[ep.kind] || [], ACTS_NIGHT_BY_KIND[ep.kind] || [])
+      .find(x => x.id === ep.act);
+    if (a) h += `<div class="card"><h3>${isNight() ? "Что сделать сейчас" : "Твой план на 10 минут"}</h3>
+      <p>${esc(a.t)} — начни прямо сейчас, пока волна низкая.</p></div>`;
   }
 
   h += `<div class="sechead">Желание ещё сильное?</div>
@@ -688,10 +805,127 @@ const fmtSec = s => s < 60 ? s + " сек" : Math.round(s / 60) + " мин";
 
 /* ───────────────────────── карта триггеров ───────────────────────── */
 
+let mapTrack = "all";          // «Всё» или конкретный трек
+
 function renderMap() {
+  const v = $("#v-map");
+  const tabs = `<div class="ttabs">
+      <button class="tt${mapTrack === "all" ? " on" : ""}" data-tt="all">Всё</button>
+      ${TRACKED.map(k => `<button class="tt${mapTrack === k ? " on" : ""}" data-tt="${k}">${kindOf(k).e} ${esc(kindOf(k).t)}</button>`).join("")}
+    </div>`;
+  if (mapTrack !== "all") { renderTrack(mapTrack, tabs); bindTabs(v); return; }
+  renderMapAll(tabs);
+  bindTabs(v);
+}
+function bindTabs(v) {
+  v.querySelectorAll("[data-tt]").forEach(b => b.onclick = () => {
+    mapTrack = b.dataset.tt; renderMap(); $("#scroll").scrollTop = 0;
+  });
+}
+
+/* ── Трек: свой счёт для конкретного импульса ──
+   Оценка идёт не по «дням без», а по тому, насколько разошлись импульс
+   и действие: доля переждённых волн, длина паузы, ночная доля, рычаги. */
+function renderTrack(kind, tabs) {
+  const v = $("#v-map"), k = kindOf(kind);
+  const ep = DB.ep.filter(e => e.kind === kind);
+  const day = new Date().toISOString().slice(0, 10);
+  const levs = LEVERS[kind] || [];
+  const on = DB.lev[day] || [];
+
+  const leverBox = `
+    <div class="sechead">Рычаги на сегодня</div>
+    <div class="card"><p style="margin-bottom:12px">Это не задание и не оценка дня. Это то, что по исследованиям
+      двигает дело сильнее уговоров: убрать повод дешевле, чем ему сопротивляться.</p>
+      <div class="levs">${levs.map(l => `
+        <button class="lev${on.includes(l.id) ? " on" : ""}" data-lev="${l.id}">
+          <span class="box">${on.includes(l.id) ? "✓" : ""}</span>
+          <span class="lt"><b>${esc(l.t)}</b><em>${esc(l.h)}</em></span>
+        </button>`).join("")}</div>
+      <p class="hint">Держится сегодня: ${on.length} из ${levs.length}.</p></div>`;
+
+  const science = `
+    <div class="sechead">Что об этом известно</div>
+    <div class="card sci">${(SCIENCE[kind] || []).map(([m, t]) =>
+      `<p class="sci-l ${m === "✔" ? "yes" : m === "✖" ? "no" : "note"}"><i>${m}</i><span>${esc(t)}</span></p>`).join("")}</div>`;
+
+  if (ep.length < 3) {
+    v.innerHTML = tabs + `
+      <div class="empty">Здесь будет свой счёт по этому импульсу.<br>
+      Нужно ещё ${3 - ep.length} ${3 - ep.length === 1 ? "пауза" : "паузы"}, чтобы было что показывать.</div>`
+      + leverBox + science;
+    bindLevers(v, day);
+    return;
+  }
+
+  const waited = ep.filter(e => e.outcome === "waited").length;
+  const share = waited / ep.length;
+  const stage = share < 0.3 ? 0 : share < 0.6 ? 1 : share < 0.85 ? 2 : 3;
+  const st = STAGES[kind][stage];
+
+  /* растёт ли длина паузы: первая половина против второй */
+  const half = Math.floor(ep.length / 2);
+  const avg = list => list.length ? Math.round(list.reduce((a, e) => a + e.waited, 0) / list.length / 60 * 10) / 10 : 0;
+  const early = avg(ep.slice(0, half)), late = avg(ep.slice(half));
+
+  const night = ep.filter(e => { const h = new Date(e.ts).getHours(); return h >= 23 || h < 6; }).length;
+  const d14 = Date.now() - 14 * 864e5;
+  const last14 = ep.filter(e => e.ts >= d14).length;
+  const prev14 = ep.filter(e => e.ts >= d14 - 14 * 864e5 && e.ts < d14).length;
+
+  /* рычаги за последние 7 дней — насколько среда под контролем */
+  let held = 0, slots = 0;
+  for (let i = 0; i < 7; i++) {
+    const dk = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10);
+    held += (DB.lev[dk] || []).filter(id => levs.some(l => l.id === id)).length;
+    slots += levs.length;
+  }
+
+  const marks = [];
+  if (ep.length >= 6) marks.push(late > early
+    ? ["📈", `Пауза стала длиннее: было ${early} мин в среднем, стало <em>${late} мин</em>. Это и есть тренировка — терпеть становится легче.`]
+    : ["📉", `Средняя пауза пока не растёт: было ${early} мин, стало ${late} мин. Не страшно — на это уходят недели, а не дни.`]);
+  if (prev14) marks.push(last14 <= prev14
+    ? ["🌘", `Эпизодов за две недели: <em>${last14}</em> против ${prev14} до этого. Реже.`]
+    : ["🌘", `Эпизодов за две недели: <em>${last14}</em> против ${prev14} до этого. Чаще — стоит посмотреть на рычаги ниже.`]);
+  if (kind === "food" && ep.length >= 4) {
+    marks.push(["🌙", `Ночью (с 23:00 до 06:00) — <em>${Math.round(night / ep.length * 100)}%</em> эпизодов.
+      Если доля высокая, дело обычно не в ночи, а в том, сколько съедено днём.`]);
+  }
+  if (slots) marks.push(["🧱", `Рычаги среды за неделю: <em>${Math.round(held / slots * 100)}%</em>.
+    По исследованиям это двигает дело сильнее, чем настрой.`]);
+
+  v.innerHTML = tabs + `
+    <div class="sechead">${esc(k.t)} · оценка</div>
+    <div class="card stage">
+      <div class="st-row">${STAGES[kind].map((x, i) =>
+        `<span class="st-d${i <= stage ? " on" : ""}"></span>`).join("")}</div>
+      <h3>${esc(st.t)}</h3>
+      <p>${esc(st.d)}</p>
+      <p class="hint">Считается по доле волн, которые ты переждал: <b>${waited} из ${ep.length}</b>.
+      Это не «дни без срыва»: один эпизод ничего не обнуляет, оценка просто чуть сдвигается.</p>
+    </div>
+
+    <div class="sechead">Как идёт</div>
+    ${marks.map(([e, t]) => `<div class="insight"><span class="e">${e}</span><p>${t}</p></div>`).join("")}
+
+    ${leverBox}
+    ${science}`;
+  bindLevers(v, day);
+}
+function bindLevers(v, day) {
+  v.querySelectorAll("[data-lev]").forEach(b => b.onclick = () => {
+    const id = b.dataset.lev;
+    const cur = DB.lev[day] || [];
+    DB.lev[day] = cur.includes(id) ? cur.filter(x => x !== id) : cur.concat(id);
+    save(); markDirty(); renderMap(); vib(6);
+  });
+}
+
+function renderMapAll(tabs) {
   const v = $("#v-map"), s = stats(), ep = DB.ep;
   if (ep.length < 3) {
-    v.innerHTML = `<div class="sechead">Карта триггеров</div>
+    v.innerHTML = tabs + `<div class="sechead">Карта триггеров</div>
       <div class="empty">Пока мало данных.<br>После ${3 - ep.length} ${3 - ep.length === 1 ? "паузы" : "пауз"}
       здесь появится, <b>когда</b> и <b>из-за чего</b> тебя накрывает.<br><br>
       Карта не оценивает. Она показывает паттерн.</div>`;
@@ -758,7 +992,7 @@ function renderMap() {
     ins.push(["🔁", `С выбранным занятием на замену волна проходит в <em>${Math.round(a * 100)}%</em> случаев.`]);
   }
 
-  v.innerHTML = `
+  v.innerHTML = tabs + `
     <div class="sechead">Когда накрывает</div>
     <div class="card"><div class="hours">${hh}</div>
       <div class="hlabels"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div></div>
@@ -771,7 +1005,8 @@ function renderMap() {
 }
 /* Ищем среди всех, включая убранные: убрать причину из списка — не то же самое,
    что стереть её из прошлых отметок. Карта должна читаться и через полгода. */
-const nameState = id => (STATES.concat(DB.why).find(s => s.id === id) || { t: id }).t;
+const nameState = id => (STATES.concat(STATE_EXTRA.food, STATE_EXTRA.self, DB.why)
+  .find(s => s.id === id) || { t: id }).t;
 
 /* ───────────────────────── награды ───────────────────────── */
 
