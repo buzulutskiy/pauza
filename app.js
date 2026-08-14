@@ -30,6 +30,11 @@ const STATES = [
   { id: "habit",  t: "Просто привычка" },
   { id: "idle",   t: "Нечем заняться" }
 ];
+/* Готовый список — только начало разговора. Настоящая причина у каждого своя
+   и словами тоже своими: «после созвона», «доскроллился», «поссорились».
+   Названная своими словами, она потом узнаётся мгновенно. */
+const ownStates = () => DB.why.filter(w => !w.del);
+const allStates = () => STATES.concat(ownStates());
 
 /* занятия на 10 минут: общий пул + добавки под конкретный импульс */
 const ACTS_COMMON = [
@@ -97,9 +102,9 @@ const MEDALS = [
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(KEY));
-    if (d && d.v === 1) return d;
+    if (d && d.v === 1) { d.why = d.why || []; return d; }
   } catch (e) {}
-  return { v: 1, ep: [], kinds: [], medals: {}, live: null, s: { dur: 300, vib: true, theme: "auto" } };
+  return { v: 1, ep: [], kinds: [], why: [], medals: {}, live: null, s: { dur: 300, vib: true, theme: "auto" } };
 }
 let DB = load();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {} };
@@ -140,7 +145,7 @@ function gh(path, opts = {}) {
   }, opts));
 }
 
-const exportData = () => ({ version: 1, ep: DB.ep, kinds: DB.kinds, medals: DB.medals });
+const exportData = () => ({ version: 1, ep: DB.ep, kinds: DB.kinds, why: DB.why, medals: DB.medals });
 
 function mergeAll(remote) {
   /* эпизоды и свои импульсы — по id, побеждает более свежая правка */
@@ -159,6 +164,14 @@ function mergeAll(remote) {
     if (!ex || (x.upd || 0) >= (ex.upd || 0)) kById.set(x.id, x);
   }
   DB.kinds = [...kById.values()];
+
+  const wById = new Map();
+  for (const x of remote.why || []) wById.set(x.id, x);
+  for (const x of DB.why) {
+    const ex = wById.get(x.id);
+    if (!ex || (x.upd || 0) >= (ex.upd || 0)) wById.set(x.id, x);
+  }
+  DB.why = [...wById.values()];
 
   /* медаль засчитывается по самой ранней дате получения */
   for (const [id, ts] of Object.entries(remote.medals || {})) {
@@ -505,16 +518,27 @@ function renderBot() {
     return;
   }
   if (stage === "states") {
-    const c = el("div", "qcard", `<h4>Что сейчас происходит?</h4>`);
+    const c = el("div", "qcard", `<h4>Из-за чего накрыло?</h4>`);
     const o = el("div", "opts");
-    for (const s of STATES) {
+    for (const s of allStates()) {
       const b = el("button", "opt" + (live.states.includes(s.id) ? " on" : ""), esc(s.t));
       b.addEventListener("click", () => {
         live.states = live.states.includes(s.id) ? live.states.filter(x => x !== s.id) : live.states.concat(s.id);
-        DB.live = live; save(); b.classList.toggle("on"); vib(6);
+        DB.live = live; save(); markDirty(); b.classList.toggle("on"); vib(6);
       });
       o.appendChild(b);
     }
+    /* Своя причина сразу отмечается: её и добавляют потому, что она сейчас верна. */
+    const add = el("button", "opt add", "＋ своё");
+    add.addEventListener("click", () => {
+      const t = (prompt("Из-за чего накрыло? Своими словами.") || "").trim();
+      if (!t) return;
+      const rec = { id: "w" + uid(), t: t.slice(0, 40), upd: Date.now() };
+      DB.why.push(rec);
+      live.states = live.states.concat(rec.id);
+      DB.live = live; save(); markDirty(); renderBot(); vib(10);
+    });
+    o.appendChild(add);
     c.appendChild(o);
     box.appendChild(c);
     return;
@@ -745,7 +769,9 @@ function renderMap() {
     ${ins.map(([e, t]) => `<div class="insight"><span class="e">${e}</span><p>${t}</p></div>`).join("")}
     <div class="hint">Всего отметок: ${ep.length}. Чем честнее отвечаешь после волны, тем точнее карта.</div>`;
 }
-const nameState = id => (STATES.find(s => s.id === id) || { t: id }).t;
+/* Ищем среди всех, включая убранные: убрать причину из списка — не то же самое,
+   что стереть её из прошлых отметок. Карта должна читаться и через полгода. */
+const nameState = id => (STATES.concat(DB.why).find(s => s.id === id) || { t: id }).t;
 
 /* ───────────────────────── награды ───────────────────────── */
 
@@ -838,6 +864,13 @@ function renderSet() {
       </div>
       <p style="margin-top:12px">Пик желания обычно проходит за 3–7 минут. 5 минут хватает почти всегда;
       10–15 берут, когда накрывает сильно.</p></div>
+    <div class="card"><h3>Свои причины</h3>
+      <p>То, из-за чего накрывает именно тебя. Добавляются прямо во время волны кнопкой «＋ своё»,
+      здесь их можно убрать. Уже сделанные отметки при этом сохраняются.</p>
+      ${ownStates().length ? `<div class="opts" style="margin-top:12px" id="whyBox">
+        ${ownStates().map(w => `<button class="opt" data-wdel="${w.id}">${esc(w.t)} ✕</button>`).join("")}
+      </div>` : `<p class="hint">Пока ни одной. Список готовых причин никуда не денется — свои просто добавляются к нему.</p>`}
+    </div>
     <div class="card"><h3>Вибрация</h3>
       <div class="opts" style="margin-top:10px">
         <button class="opt${DB.s.vib ? " on" : ""}" data-vib="1">Включена</button>
@@ -866,6 +899,11 @@ function renderSet() {
   renderSyncCard();
   v.querySelectorAll("[data-sd]").forEach(b => b.onclick = () => { DB.s.dur = +b.dataset.sd; save(); renderSet(); });
   v.querySelectorAll("[data-vib]").forEach(b => b.onclick = () => { DB.s.vib = b.dataset.vib === "1"; save(); renderSet(); vib(10); });
+  v.querySelectorAll("[data-wdel]").forEach(b => b.onclick = () => {
+    const w = DB.why.find(x => x.id === b.dataset.wdel);
+    if (w) { w.del = 1; w.upd = Date.now(); }
+    save(); markDirty(); renderSet();
+  });
   v.querySelector("#expBtn").onclick = () => {
     const blob = new Blob([JSON.stringify(DB)], { type: "application/json" });
     const a = document.createElement("a");
