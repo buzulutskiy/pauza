@@ -237,7 +237,9 @@ async function syncNow(manual) {
 
 /* ───────────────────────── подсчёты ───────────────────────── */
 
-const dayKey = ts => { const d = new Date(ts); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); };
+/* с ведущими нулями: ключи дней сортируются как текст */
+const p2 = n => String(n).padStart(2, "0");
+const dayKey = ts => { const d = new Date(ts); return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()); };
 
 function streaks() {
   const days = [...new Set(DB.ep.map(e => dayKey(e.ts)))].sort();
